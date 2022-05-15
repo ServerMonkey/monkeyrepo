@@ -1,0 +1,178 @@
+#!/bin/sh
+# Find *-LATEST.deb packages and create a local repo
+# Based on: https://assafmo.github.io/2019/05/02/ppa-repo-hosted-on-github.html
+# https://medium.com/sqooba/create-your-own-custom-and-authenticated-apt-repository-1e4a4cf0b864
+
+# help
+if [ -z "${1}" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    echo "Find Debian packages with the pattern *-LATEST.deb recursivly and creates a repo"
+    echo "- Automatically creates 'Packages.gz' and 'Release' files"
+    echo "- Searches <SRC_FOLDER> recursivly."
+    echo "- Creates a repo in the folder <DEST_FOLDER>."
+    echo "- If run as root, automatically creates repo in /srv/local-apt-repository,"
+    echo "instead of <DEST_FOLDER>."
+    echo ""
+    echo "Usage: monkeyrepo <SRC_FOLDER> <DEST_FOLDER> <GPG_SIGN_MAIL>"
+    echo "<GPG_SIGN_MAIL> is optional."
+    echo ""
+    echo "Examples:"
+    echo "Create a local offline repo:"
+    echo "  sudo monkeyrepo my-sources-folder"
+    echo "Create repo for current user:"
+    echo "  monkeyrepo my-sources-folder my-dest-folder"
+    echo "Create repo for current user and sign it:"
+    echo "  monkeyrepo my-sources-folder my-dest-folder gpg-mail@example.org"
+    exit 0
+fi
+if [ "$(id -u)" -ne 0 ] && [ -z "${2}" ]; then
+    echo "What is the destination package folder?"
+    echo "Or run as root."
+    exit 1
+fi
+
+### FUNCTIONS ###
+
+hash_make() {
+    md5sum "$1" | awk '{print $1}'
+}
+
+sync_file() {
+    FILE_NAME=$(basename "$1")
+    echo "SYNC: $FILE_NAME --> $2"
+    rsync "$1" "$2" || exit 1
+    hash_make "$1" >"$2.md5"
+}
+
+### VARIABLES ###
+SEARCH_PATH=$1
+TEMP_FILE="/tmp/monkeyrepo.txt"
+if [ "$(id -u)" = 0 ]; then
+    REPO="/srv/local-apt-repository"
+else
+    REPO=$2
+fi
+GPG_MAIL=$3
+CHANGES=false
+
+### MAIN ###
+
+# create empty repo dirs
+mkdir -p "$REPO" || exit 1
+cd "$REPO" || exit 1
+
+# export pub key
+if [ -n "$GPG_MAIL" ]; then
+    echo "> Export pub key"
+    # reload GPG
+    gpg-connect-agent reloadagent /bye 1>/dev/null
+    GPG_TTY=$(tty)
+    export GPG_TTY
+    # export key
+    gpg --armor --export "$GPG_MAIL" >"KEY.gpg" || exit 1
+    wait
+fi
+
+# get a list of all LATEST packages
+PATTERN="*-LATEST.deb"
+PACKAGES=$(find "$SEARCH_PATH" -name "$PATTERN" -print)
+echo "$PACKAGES" >"$TEMP_FILE"
+
+# sync all deb files
+echo "> Sync packages"
+while read -r line; do
+    DEB_NAME=$(basename "$line")
+    DEST="$REPO/$DEB_NAME"
+    FILE_DES_HASH="$DEST.md5"
+
+    # create src hash file if there is no hash file
+    if [ ! -f "$FILE_DES_HASH" ]; then
+        echo "NEW PACKAGE: $DEB_NAME"
+    fi
+
+    # get current hash
+    SRC_HASH_CURRENT=$(hash_make "$line")
+
+    # compare to existing destination package
+    if [ -f "$DEST" ]; then
+        DES_HASH=$(cat "$FILE_DES_HASH" 2>/dev/null)
+        # sync if there is a new package
+        if [ "$SRC_HASH_CURRENT" != "$DES_HASH" ]; then
+            sync_file "$line" "$DEST"
+            # sign
+            if [ -n "$GPG_MAIL" ]; then
+                echo "SIGN: $DEB_NAME"
+                dpkg-sig -k "$GPG_MAIL" --sign repo "$DEST" || exit 1
+                wait
+            fi
+            CHANGES=true
+        else
+            echo "SKIPPING: already latest version $DEB_NAME"
+        fi
+    # sync if there is no target package
+    else
+        sync_file "$line" "$DEST"
+        # sign
+        if [ -n "$GPG_MAIL" ]; then
+            echo "SIGN: $DEB_NAME"
+            dpkg-sig -k "$GPG_MAIL" --sign repo "$DEST" || exit 1
+            wait
+        fi
+        CHANGES=true
+    fi
+
+done <"$TEMP_FILE"
+rm -f "$TEMP_FILE"
+
+if [ "$CHANGES" = false ]; then
+    echo "No new packages"
+    exit 0
+fi
+
+# package
+echo "> Create 'Packages'"
+rm -f Packages Packages.gz Release
+#apt-ftparchive packages . >Packages || exit 1
+dpkg-scanpackages --multiversion . >Packages || exit 1
+gzip -k -f Packages || exit 1
+
+# create readme
+echo "> Create 'README.md'"
+README="README.md"
+echo "### Packages:" >"$README"
+grep -E 'Package|Description' Packages |
+    sed 's|Package: |\n#### |' |
+    sed 's|Description: |> |' >>"$README"
+
+# release
+echo "> Create 'Release'"
+apt-ftparchive release . >Release || exit 1
+
+# publish and sign
+if [ -n "$GPG_MAIL" ]; then
+    echo "> Publish and sign repo"
+
+    # sign repo
+    rm -f Release.gpg InRelease
+    echo ">Creating Release.gpg"
+    gpg --default-key "$GPG_MAIL" -abs -o - Release >Release.gpg || exit 1
+    echo "> Creating InRelease"
+    gpg --default-key "$GPG_MAIL" --clearsign -o - Release >InRelease || exit 1
+
+    # create index.html
+    echo "> Creating index.html"
+    rm -f index.html
+    pandoc --standalone --metadata title="Debian Repo" \
+        -f markdown "$README" >index.html
+fi
+
+# update local repo when run as root
+if [ "$(id -u)" = 0 ]; then
+    echo "> Update repo"
+    sudo apt-get update \
+        -o Dir::Etc::sourcelist="sources.list.d/local-apt-repository.list" \
+        -o Dir::Etc::sourceparts="-" \
+        -o APT::Get::List-Cleanup="0"
+fi
+
+echo "Done"
+echo ""
