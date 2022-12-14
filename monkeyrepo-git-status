@@ -1,0 +1,29 @@
+#!/bin/sh
+
+TARGET_PATH="$1"
+
+RED=$(tput setaf 1)
+GREEN=$(tput setaf 2)
+NOCOL=$(tput sgr0)
+
+echo "PATH: $TARGET_PATH"
+for f in "$TARGET_PATH"/*; do
+    [ -e "$f" ] || continue
+    # ignore files
+    if [ -d "$f" ]; then
+        REPO_NAME=$(basename "$f")
+        # check if a folder does not exist
+        if [ -d "$f/.git" ]; then
+            GIT_STATUS=$(git -C "$f" status -s)
+            if [ -n "$GIT_STATUS" ]; then
+                echo "${RED}[UNCOMMITTED] $REPO_NAME${NOCOL}"
+            else
+                echo "${GREEN}[NO CHANGES ]${NOCOL} $REPO_NAME"
+            fi
+        else
+            echo "[NOT A REPO ] $REPO_NAME"
+        fi
+    fi
+
+done
+echo ""

@@ -10,6 +10,9 @@ Tested on Debian 11
 For help run  
 `monkeyrepo -h`
 
+List all uncommited git repos in all subfolders.  
+`monkeyrepo-git-status <FOLDER>`
+
 ### Add your repo to APT
 `REPO="http://yourrepo.url"`  
 `KEY="your.gpg.mail@example.org"`  

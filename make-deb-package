@@ -33,7 +33,7 @@ mkdir -p "$PATH_SHARE"
 cp -t "$PATH_SHARE" "README.md" "copyright" || exit 1
 mkdir -p "$PATH_BIN"
 chmod 0755 "monkeyrepo"
-cp -t "$PATH_BIN" "monkeyrepo" || exit 1
+cp -t "$PATH_BIN" "monkeyrepo" "monkeyrepo-git-status" || exit 1
 
 # create Debian control file
 echo "Creating CONTROL file"
@@ -44,6 +44,7 @@ Section: net
 Priority: optional
 Architecture: all
 Depends: apt-utils (>=2), local-apt-repository (>=0.6), gnupg (>=2.2), dpkg-sig (>=0.13), pandoc (>=2.9)
+Recommends: git (>=2.3)
 Maintainer: Bodo Endres <dev@muspekaren.se>
 Description: Find packages with the pattern *-LATEST.deb recursivly and create a repo. 
 " >"$PATH_TARGET/control"
