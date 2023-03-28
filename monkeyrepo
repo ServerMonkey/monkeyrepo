@@ -159,10 +159,10 @@ if [ -n "$GPG_MAIL" ]; then
     gpg --default-key "$GPG_MAIL" --clearsign -o - Release >InRelease || exit 1
 
     # create index.html
-    echo "> Creating index.html"
-    rm -f index.html
+    echo "> Creating README.html"
+    rm -f "README.html"
     pandoc --standalone --metadata title="Debian Repo" \
-        -f markdown "$README" >index.html
+        -f markdown "$README" >"README.html"
 fi
 
 # update local repo when run as root
