@@ -39,7 +39,7 @@ hash_make() {
 sync_file() {
     FILE_NAME=$(basename "$1")
     echo "SYNC: $FILE_NAME --> $2"
-    rsync "$1" "$2" || exit 1
+    rsync -L "$1" "$2" || exit 1
     hash_make "$1" >"$2.md5"
 }
 
