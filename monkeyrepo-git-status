@@ -14,11 +14,15 @@ for f in "$TARGET_PATH"/*; do
         REPO_NAME=$(basename "$f")
         # check if a folder does not exist
         if [ -d "$f/.git" ]; then
-            GIT_STATUS=$(git -C "$f" status -s)
-            if [ -n "$GIT_STATUS" ]; then
+            STATUS_COMMIT=$(git -C "$f" status -s)
+            if [ -n "$STATUS_COMMIT" ]; then
                 echo "${RED}[UNCOMMITTED] $REPO_NAME${NOCOL}"
             else
                 echo "${GREEN}[NO CHANGES ]${NOCOL} $REPO_NAME"
+            fi
+            STATUS_PUSH=$(git -C "$f" cherry -v)
+			if [ -n "$STATUS_PUSH" ]; then
+                echo "${RED}[NOT PUSHED ] $REPO_NAME${NOCOL}"
             fi
         else
             echo "[NOT A REPO ] $REPO_NAME"
