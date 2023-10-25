@@ -30,7 +30,16 @@ if [ "$(id -u)" -ne 0 ] && [ -z "${2}" ]; then
     exit 1
 fi
 
+GREEN=$(tput setaf 2)
+YELLOW=$(tput setaf 3)
+NOCOL=$(tput sgr0)
+
 ### FUNCTIONS ###
+
+error() {
+    echo "ERROR: $1"
+    exit 1
+}
 
 hash_make() {
     md5sum "$1" | awk '{print $1}'
@@ -38,9 +47,21 @@ hash_make() {
 
 sync_file() {
     FILE_NAME=$(basename "$1")
-    echo "SYNC: $FILE_NAME --> $2"
+    echo "${GREEN}SYNC: $FILE_NAME --> $2${NOCOL}"
     rsync -L "$1" "$2" || exit 1
     hash_make "$1" >"$2.md5"
+}
+
+sign_deb() {
+    FILE_DEST="$1"
+    GPG_MAIL="$2"
+    # sign
+    if [ -n "$GPG_MAIL" ]; then
+        DEB_NAME=$(basename "$FILE_DEST")
+        echo "${YELLOW}SIGN: $DEB_NAME${NOCOL}"
+        debsigs --sign=maint --default-key="$GPG_MAIL" "$FILE_DEST" ||
+            error "Failed to sign $FILE_DEST"
+    fi
 }
 
 ### VARIABLES ###
@@ -57,8 +78,8 @@ CHANGES=false
 ### MAIN ###
 
 # create empty repo dirs
-mkdir -p "$REPO" || exit 1
-cd "$REPO" || exit 1
+mkdir -p "$REPO" || error "mkdir $REPO"
+cd "$REPO" || error "cd $REPO"
 
 # export pub key
 if [ -n "$GPG_MAIL" ]; then
@@ -68,7 +89,7 @@ if [ -n "$GPG_MAIL" ]; then
     GPG_TTY=$(tty)
     export GPG_TTY
     # export key
-    gpg --armor --export "$GPG_MAIL" >"KEY.gpg" || exit 1
+    gpg --armor --export "$GPG_MAIL" >"KEY.gpg" || error "Failed to export key"
     wait
 fi
 
@@ -98,12 +119,7 @@ while read -r line; do
         # sync if there is a new package
         if [ "$SRC_HASH_CURRENT" != "$DES_HASH" ]; then
             sync_file "$line" "$DEST"
-            # sign
-            if [ -n "$GPG_MAIL" ]; then
-                echo "SIGN: $DEB_NAME"
-                dpkg-sig -k "$GPG_MAIL" --sign repo "$DEST" || exit 1
-                wait
-            fi
+            sign_deb "$DEST" "$GPG_MAIL"
             CHANGES=true
         else
             echo "SKIPPING: already latest version $DEB_NAME"
@@ -111,12 +127,7 @@ while read -r line; do
     # sync if there is no target package
     else
         sync_file "$line" "$DEST"
-        # sign
-        if [ -n "$GPG_MAIL" ]; then
-            echo "SIGN: $DEB_NAME"
-            dpkg-sig -k "$GPG_MAIL" --sign repo "$DEST" || exit 1
-            wait
-        fi
+        sign_deb "$DEST" "$GPG_MAIL"
         CHANGES=true
     fi
 
@@ -131,9 +142,8 @@ fi
 # package
 echo "> Create 'Packages'"
 rm -f Packages Packages.gz Release
-#apt-ftparchive packages . >Packages || exit 1
-dpkg-scanpackages --multiversion . >Packages || exit 1
-gzip -k -f Packages || exit 1
+dpkg-scanpackages --multiversion . >Packages || error "Failed scanpackages"
+gzip -k -f Packages || error "Failed to gzip Packages"
 
 # create readme
 echo "> Create 'README.md'"
@@ -145,7 +155,7 @@ grep -E 'Package|Description' Packages |
 
 # release
 echo "> Create 'Release'"
-apt-ftparchive release . >Release || exit 1
+apt-ftparchive release . >Release || error "Failed apt-ftparchive"
 
 # publish and sign
 if [ -n "$GPG_MAIL" ]; then
@@ -154,9 +164,11 @@ if [ -n "$GPG_MAIL" ]; then
     # sign repo
     rm -f Release.gpg InRelease
     echo ">Creating Release.gpg"
-    gpg --default-key "$GPG_MAIL" -abs -o - Release >Release.gpg || exit 1
+    gpg --default-key "$GPG_MAIL" -abs -o - Release >Release.gpg ||
+        error "Failed to sign Release"
     echo "> Creating InRelease"
-    gpg --default-key "$GPG_MAIL" --clearsign -o - Release >InRelease || exit 1
+    gpg --default-key "$GPG_MAIL" --clearsign -o - Release >InRelease ||
+        error "Failed to sign InRelease"
 
     # create index.html
     echo "> Creating README.html"
@@ -168,6 +180,13 @@ fi
 # update local repo when run as root
 if [ "$(id -u)" = 0 ]; then
     echo "> Update repo"
+    # fix bug
+    APT_RELEASE="/var/lib/apt/lists/_var_lib_local-apt-repository_._Release"
+    if ! [ -L "$APT_RELEASE" ]; then
+        echo "Fixing APT bug, creating symlink to Release"
+        sudo ln -sf "/var/lib/local-apt-repository/./Release" "$APT_RELEASE"
+    fi
+    # update local repo
     sudo apt-get update \
         -o Dir::Etc::sourcelist="sources.list.d/local-apt-repository.list" \
         -o Dir::Etc::sourceparts="-" \

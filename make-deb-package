@@ -43,7 +43,7 @@ Version: $VERSION
 Section: net
 Priority: optional
 Architecture: all
-Depends: apt-utils (>=2), local-apt-repository (>=0.6), gnupg (>=2.2), dpkg-sig (>=0.13), pandoc (>=2.9)
+Depends: apt-utils (>=2), local-apt-repository (>=0.6), gnupg (>=2.2), debsigs (>=0.1.25), pandoc (>=2.9)
 Recommends: git (>=2.3)
 Maintainer: Bodo Endres <dev@muspekaren.se>
 Description: Find packages with the pattern *-LATEST.deb recursivly and create a repo. 
@@ -62,8 +62,10 @@ zip -q -r "$RELEASES/$NAME-$VERSION.source.zip" ./* \
 wait
 
 # replace latest version
-cp "$PATH_BASE.deb" "$RELEASES/$NAME-LATEST.deb"
-cp "$PATH_BASE.source.zip" "$RELEASES/$NAME-LATEST-source.zip"
+cd "$RELEASES" || exit 1
+ln -sf "$NAME-$VERSION.deb" "$NAME-LATEST.deb"
+ln -sf "$NAME-$VERSION.source.zip" "$NAME-LATEST.source.zip"
+cd "$APP_DIR" || exit 1
 
 # clean up
 echo "Clean up"
